@@ -75,6 +75,7 @@ int main() {
   h.onMessage([&mpc,&is_init](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
 
+    //reset the simulator when we open the program for faster testing
     if (!is_init){
       //why is this not working on this version of the simulator?
       std::string reset_msg = "42[\"reset\",{}]";
@@ -106,7 +107,8 @@ int main() {
           double delta = j[1]["steering_angle"];
           double acc = j[1]["throttle"];
 
-
+          //predict the next location and use that as the basis for the MPC algorithm
+          //do this to handle latency
           double dt = .1; //assumed latency
 
           px += v*cos(psi)*dt;
@@ -121,7 +123,6 @@ int main() {
 
           //convert waypoints into coordinate system that has the car at
           //the origin and has the cars heading as the positive x direction
-
           for(int i=0; i < ptsx.size(); i++){
             double dx = ptsx[i]-px;
             double dy = ptsy[i]-py;
@@ -130,33 +131,30 @@ int main() {
           }
 
           //polyfit needs an Eigen VectorXd, create one with the ptsx and ptsy values
-
-          Eigen::VectorXd ptsx_eig(6); // = Eigen::VectorXd(6);
+          Eigen::VectorXd ptsx_eig(6);
           ptsx_eig << ptsx[0],ptsx[1],ptsx[2],ptsx[3],ptsx[4],ptsx[5];
 
-          Eigen::VectorXd ptsy_eig(6);// = Eigen::VectorXd(6);
+          Eigen::VectorXd ptsy_eig(6);
           ptsy_eig << ptsy[0],ptsy[1],ptsy[2],ptsy[3],ptsy[4],ptsy[5];
 
-          //cout << ptsx_eig;
-
+          //fit a 3rd degree polynomial to our waypoints
           auto coeffs = polyfit(ptsx_eig,ptsy_eig,3);
 
+          //calculate the cte and angle differences
           double cte = polyeval(coeffs,0);
           double epsi = -atan(coeffs[1]);
 
           Eigen::VectorXd state(6);
-
           state << 0,0,0,v,cte,epsi;
 
+          //solve
           auto vars = mpc.Solve(state,coeffs);
-
 
           double steer_value = -1*vars[0]/(deg2rad(25)*Lf);
           cout << vars[0]/(deg2rad(25)*Lf) << endl;;
           double throttle_value = vars[1];
           json msgJson;
-          // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
-          // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
+          //divide by deg2rad(25) before you send the steering value back.
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
@@ -168,6 +166,7 @@ int main() {
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
+          //draw the paths:
           int N = 12;
           double dx=3.0;
 
@@ -188,28 +187,15 @@ int main() {
             }
           }
 
-
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
-
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
-
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
-          // Latency
-          // The purpose is to mimic real driving conditions where
-          // the car does actuate the commands instantly.
-          //
-          // Feel free to play around with this value but should be to drive
-          // around the track with 100ms latency.
-          //
-          // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
-          // SUBMITTING.
+          //latency
           this_thread::sleep_for(chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
